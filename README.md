@@ -20,7 +20,7 @@ The 1.2 code is missing some functionality, but is simpler code and will compile
 
 I'm going to completely redo the command line syntax in 3.0, because it's gotten rather cruddy. Suggestions will be appreciated... also ideas for new features would be timely.
 
-## Documentation: (the version an option was added is in italic in parentheses)
+## Documentation: (the version an option was added is in parentheses)
 
 ### PLUG(1)
 
