@@ -2,7 +2,7 @@
 #
 
 SOURCES= README Makefile LICENSE plug.1 plug.c plug.h config.h includes.h
-VER=2.5.3
+VER=2.5.4
 T=plugdaemon-$(VER)
 
 # dietlibc with al
@@ -17,6 +17,9 @@ LFLAGS=
 #CC=cc
 #CFLAGS=-O -g
 #LFLAGS=
+
+#Solaris / other System V toolchains
+#LIBS=-lsocket -lnsl
 LIBS= 
 
 all: plug plug.doc

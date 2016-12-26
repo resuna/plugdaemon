@@ -304,15 +304,15 @@ char *sa2ascii(struct sockaddr_in *a, char *bufp)
 	return bufp;
 }
 
-#define bump(str,size,tmp) (tmp = strlen(str), size -= tmp, str += tmp)
-#define pad(str,size) (*(str)++ = ' ', *(str) = 0, (size)++)
+#define JUMP_END(str,size,tmp) (tmp = strlen(str), size -= tmp, str += tmp)
+#define ADD_BLANK(str,size) (*(str)++ = ' ', *(str) = 0, (size)++)
 
 void
 logout(int status, loginfo_t *lp)
 {
 	char logbuffer[BUFSIZ];
-	char *bp = logbuffer;
-	size_t room = BUFSIZ, len;
+	char *buf_ptr = logbuffer;
+	size_t buf_left = BUFSIZ, len;
 	time_t t;
 	struct timeval now;
 	struct timezone zone;
@@ -329,27 +329,27 @@ logout(int status, loginfo_t *lp)
 	gettimeofday(&now, &zone);
 
 	t = time(NULL);
-	strftime(bp, room, "[%Y-%m-%d %H:%M:%S] ", localtime(&t));
-	bump(bp,room,len);
+	strftime(buf_ptr, buf_left, "[%Y-%m-%d %H:%M:%S] ", localtime(&t));
+	JUMP_END(buf_ptr,buf_left,len);
 
-	sprintf(bp, "plug[%d] ", getpid());
-	bump(bp,room,len);
+	sprintf(buf_ptr, "plug[%d] ", getpid());
+	JUMP_END(buf_ptr,buf_left,len);
 
-	sa2ascii(&lp->listen, bp);
-	bump(bp,room,len);
-	pad(bp,room);
+	sa2ascii(&lp->listen, buf_ptr);
+	JUMP_END(buf_ptr,buf_left,len);
+	ADD_BLANK(buf_ptr,buf_left);
 
 	lp->peer.sin_port = 0; /* Don't care */
-	sa2ascii(&lp->peer, bp);
-	bump(bp,room,len);
-	pad(bp,room);
+	sa2ascii(&lp->peer, buf_ptr);
+	JUMP_END(buf_ptr,buf_left,len);
+	ADD_BLANK(buf_ptr,buf_left);
 
-	sa2ascii(&lp->target, bp);
-	bump(bp,room,len);
-	pad(bp,room);
+	sa2ascii(&lp->target, buf_ptr);
+	JUMP_END(buf_ptr,buf_left,len);
+	ADD_BLANK(buf_ptr,buf_left);
 
-	sprintf(bp, "%ld %ld ", (long)lp->nread[0], (long)lp->nread[1]);
-	bump(bp,room,len);
+	sprintf(buf_ptr, "%ld %ld ", (long)lp->nread[0], (long)lp->nread[1]);
+	JUMP_END(buf_ptr,buf_left,len);
 
 	now.tv_sec -= lp->timeval.tv_sec;
 	now.tv_usec -= lp->timeval.tv_usec;
@@ -358,20 +358,20 @@ logout(int status, loginfo_t *lp)
 		now.tv_usec += 1000000L;
 	}
 	if(now.tv_sec)
-		sprintf(bp, "%ld%06ld\n",
+		sprintf(buf_ptr, "%ld%06ld\n",
 			(long)now.tv_sec, (long)now.tv_usec);
 	else
-		sprintf(bp, "%ld\n", (long)now.tv_usec);
-	bump(bp,room,len);
+		sprintf(buf_ptr, "%ld\n", (long)now.tv_usec);
+	JUMP_END(buf_ptr,buf_left,len);
 
 	if(session_file) {
 		int sfd = open(session_file, O_WRONLY|O_CREAT|O_APPEND, 0666);
 		if(sfd>=0) {
-			write(sfd, logbuffer, bp-logbuffer);
+			write(sfd, logbuffer, buf_ptr-logbuffer);
 			close(sfd);
 		}
 	} else
-		write(1, logbuffer, bp-logbuffer);
+		write(1, logbuffer, buf_ptr-logbuffer);
 }
 
 void
@@ -648,6 +648,17 @@ logclient(struct in_addr peer, char *status)
 }
 
 void
+logerror(char *event)
+{
+	char *msg = strerror(errno);
+
+	if(!daemonized)
+		fprintf(stderr, "%.64s: %s", event, msg);
+
+	syslog(LOG_ERR, "%.64s: %.64s: %s", tag, event, msg);
+}
+
+void
 fill_sockaddr_in(struct sockaddr_in *buffer, u_long addr, u_short port)
 {
 	memset(buffer, 0, sizeof *buffer);
@@ -821,8 +832,11 @@ struct dtab *select_target(int clifd, loginfo_t *lp)
 
 	if(lp || sessionmode || logging || filter_rules) {
 		len = sizeof p_addr;
-		if(getpeername( clifd, (struct sockaddr *)&p_addr, &len) == -1)
-			bailout("getpeername", S_FATAL);
+		if(getpeername( clifd, (struct sockaddr *)&p_addr, &len) == -1) {
+			/* Log instead of bailing because we're the parent. */
+			logerror("getpeername");
+			return 0;
+		}
 		if(lp)
 			lp->peer = p_addr;
 		if(filter_rules) {
@@ -868,7 +882,7 @@ struct dtab *select_target(int clifd, loginfo_t *lp)
 			client = malloc(sizeof (client_t));
 
 			if(!client) {
-				perror("malloc");
+				logerror("malloc");
 				logclient(p_addr.sin_addr,
 				    "aborted: out of memory, FATAL");
 				bailout("Out of memory allocating client table", S_FATAL);
