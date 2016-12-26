@@ -1,5 +1,5 @@
 /*
- * PLUGDAEMON. Copyright (c) 1997 Peter da Silva. All rights reserved.
+ * PLUGDAEMON. Copyright (c) 2004 Peter da Silva. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,36 +25,31 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <signal.h>
-#include <sys/errno.h>
-#include <sys/wait.h>
-#include <syslog.h>
-#include <string.h>
-#include <errno.h>
-#include <stdlib.h>
+#include "includes.h"
 #include "config.h"
 #include "plug.h"
 
 int daemonized = 0;
-char *sourceaddr = 0, *sourceport = 0;
-char *proxyaddr = 0;
-char *prog;
+char *prog = NULL;
+char tag[64];
+
+char *sourceaddr = NULL, *sourceport = NULL;
+char *proxyaddr = NULL;
+char *httpsaddr = NULL, *httpsport = NULL;
+char *session_file = NULL;
 int debug = 0;
-int log = 0;
+int verbose = 0;
+int background = 1;
+int logging = 0;
+int onlyone = 0;
 int sessionmode = 0;
 int keepalive=0;
 long timeout = 3600; /* seconds */
-char tag[64];
+long retrytime = 0; /* seconds */
 char *pidfile = NULL, *delete_pidfile = NULL;
 
 dest_t *dest_list;
-proc_t *proc_list;
+proc_t *proc_list[HASH_SIZE];
 client_t *client_list;
 
 rule_t *filter_rules = 0;
@@ -63,32 +58,49 @@ int nproxies = 0;
 int nclients = 0;
 int nprocs = 0;
 
-char *version = "plugdaemon V2.3.1 Copyright (c) 2002 Peter da Silva";
+char *version = "plugdaemon V2.5.3 Copyright (c) 2004 Peter da Silva";
+
+char *usage_string = "[-V] [-P pidfile] [-S sessionfile] [-snklfod[d]...]\n"
+		     "\t[-p proxy-addr] [-i srcaddr] [-a accept_rule]...\n"
+		     "\t[-h HTTPS-proxy[:port]] [-t timeout] [-r retry]\n"
+		     "\nport destaddr[:destport]...";
 
 int
 main(int ac, char **av)
 {
 	int srvfd, one;
 	struct sockaddr_in src_sockaddr, *prx_sockaddr;
+	struct sockaddr_in *https_sockaddr;
+	loginfo_t loginfo, *lp;
 	int pid;
 	dest_t *target;
 	int saved_errno;
 
 	one = 1;
 	prx_sockaddr = 0;
+	https_sockaddr = NULL;
 
 	parse_args(ac, av);
 
+	if(session_file && session_file[0] == '-' && session_file[1] == '\0')
+		session_file = NULL;
+
+	if(debug || (verbose && !session_file))
+		background = 0;
+
 	if (sourceaddr)
 		sprintf(tag, "(%.16s %.8s)", sourceaddr, sourceport);
-	else
+	else if(sourceport)
 		sprintf(tag, "(%.8s)", sourceport);
+	else
+		bailout("Can't happen, source port is null!", S_FATAL);
 
 	if(debug>1)
 		fprintf(stderr, "%s: %s\n", prog, tag);
 
 	/* arguments parsed, get sockets ready */
 
+	if(debug>2) fprintf(stderr, "set up listening socket\n");
 	if ((srvfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		bailout("server socket", S_FATAL);
 
@@ -101,30 +113,67 @@ main(int ac, char **av)
 		sourceaddr?inet_addr(sourceaddr):htonl(INADDR_ANY),
 		htons(atoi(sourceport)));
 
+	if(httpsaddr) {
+		if(debug>2) fprintf(stderr, "set up https proxy socket\n");
+
+		if ((httpsport = strchr(httpsaddr, ':')))
+			*httpsport++ = 0;
+		else
+			httpsport = "80";
+
+		if (!(https_sockaddr = malloc(sizeof *https_sockaddr))) {
+			bailout("alloc memory for https proxy socket", S_FATAL);
+		}
+		fill_sockaddr_in(https_sockaddr,
+				 inet_addr(httpsaddr),
+				 htons(atoi(httpsport)));
+	}
+
 	if(proxyaddr) {
+		if(debug>2) fprintf(stderr, "set up outgoing socket\n");
 		if (!(prx_sockaddr = malloc(sizeof *prx_sockaddr))) {
 			bailout("alloc memory for proxy socket", S_FATAL);
 		}
 		fill_sockaddr_in(prx_sockaddr, inet_addr(proxyaddr), 0);
 	}
 
+	if(debug>2) fprintf(stderr, "set up target socket(s)\n");
 	for(target = dest_list; target; target=target->next) {
-		char *destaddr, *portaddr;
+		char *destaddr, *destport;
 
 		destaddr = target->destname;
-		if((portaddr = strchr(destaddr, ':')))
-			*portaddr++ = 0;
+		if((destport = strchr(destaddr, ':')))
+			*destport++ = 0;
 		else
-			portaddr = sourceport;
+			destport = sourceport;
 
-		fill_sockaddr_in(&(target->addr),
-			inet_addr(destaddr), htons(atoi(portaddr)));
+		if(https_sockaddr) {
+			target->addr = *https_sockaddr;
+			target->connect = malloc(strlen(destaddr) + strlen(destport) + 2);
+			if(!target->connect)
+				bailout("malloc", S_FATAL);
+			sprintf(target->connect, "%s:%s", destaddr, destport);
+		} else {
+			fill_sockaddr_in(&(target->addr),
+				inet_addr(destaddr), htons(atoi(destport)));
+			target->connect = NULL;
+		}
 
 		target->nclients = 0;
 		target->status = S_NORMAL;
-		target->last_touched = (time_t)0;
+		target->went_bad = (time_t)0;
 		target->destname = NULL; /* it's been trashed anyway */
 	}
+
+	if(debug>2) fprintf(stderr, "set up logging\n");
+	if(verbose) {
+		lp = &loginfo;
+		memset(lp, 0, sizeof loginfo);
+		lp->listen = src_sockaddr;
+		if(prx_sockaddr)
+			lp->proxy = *prx_sockaddr;
+	} else
+		lp = NULL;
 
 	daemonize();
 
@@ -132,18 +181,20 @@ main(int ac, char **av)
 
 	init_signals();
 
+	if(debug>2) fprintf(stderr, "bind server socket\n");
 	/* One ring to rule them all */
 	if(bind(srvfd, (struct sockaddr *)&src_sockaddr, sizeof src_sockaddr) < 0)
 		bailout("server bind", S_FATAL);
 
-	if(log)
-		syslog(LOG_NOTICE, "%s: Plugdaemon started.", tag);
+	if(logging)
+		syslog(LOG_NOTICE, "%.64s: Plugdaemon started.", tag);
 
 	listen(srvfd, 5);
 
+	if(debug>2) fprintf(stderr, "start main loop\n");
 	/* wait for connections and service them */
 	while(1) {
-		int clifd, prxfd, cli_len;
+		int clifd, prxfd, cli_len, status;
 		struct sockaddr_in cli_sockaddr;
 
 		if(debug>1)
@@ -162,15 +213,18 @@ main(int ac, char **av)
 		} while (clifd < 0 && saved_errno == EINTR);
 		if(clifd < 0)
 			bailout("client accept", S_FATAL);
+		if(lp)
+			gettimeofday(&lp->timeval, &lp->timezone);
 
-		if(!(target = select_target(clifd))) {
+		if(!(target = select_target(clifd, lp))) {
 			close(clifd);
 			continue;
 		}
 
 		if(debug>1)
-		    fprintf(stderr, "%d client connecting to %d.\n",
-			(int) getpid(), ntohs(cli_sockaddr.sin_port));
+		    fprintf(stderr, "%d forwarding %d to %s.\n",
+			(int) getpid(), ntohs(cli_sockaddr.sin_port),
+			sa2ascii(&target->addr, NULL));
 
 		/* spawn a child and send the parent back to try again */
 		if((pid = fork()) == -1)
@@ -185,9 +239,11 @@ main(int ac, char **av)
 
 		/* OK, I'm the child. First, forget about my parent's
 		 * pidfile so I don't accidentally blow it away when I
-		 * exit
+		 * exit, and close the server port so if my parent dies
+		 * it can be resurrected without killing me too...
 		 */
 		delete_pidfile = 0;
+		close(srvfd);
 
 		if ((prxfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 			bailout("proxy socket", S_FATAL);
@@ -205,9 +261,8 @@ main(int ac, char **av)
 			bailout("proxy connect", S_CONNECT);
 
 		if(debug>1)
-		    fprintf(stderr, "%d connected proxy to %s:%d.\n",
-			(int) getpid(), inet_ntoa(target->addr.sin_addr),
-			ntohs(target->addr.sin_port));
+		    fprintf(stderr, "%d connected proxy to %s.\n",
+			(int) getpid(), sa2ascii(&target->addr, NULL));
 
 		if(keepalive) {
 			if(setsockopt(clifd, SOL_SOCKET, SO_KEEPALIVE,
@@ -219,8 +274,112 @@ main(int ac, char **av)
 				bailout("set proxy socket options", S_FATAL);
 			}
 		}
-		exit(plug(clifd, prxfd));
+
+		if(target->connect) {
+			char *errmsg = https_chat(prxfd, target->connect);
+			if(errmsg) {
+				bailout(errmsg, S_FATAL);
+			}
+		}
+		status = plug(clifd, prxfd, lp);
+		logout(status, lp);
+		exit(status);
 	}
+}
+
+char *sa2ascii(struct sockaddr_in *a, char *bufp)
+{
+	static char tempbuf[SA2ASCII_BUFSIZ];
+
+	if(!bufp) bufp = tempbuf;
+
+	if(a->sin_addr.s_addr == htonl(INADDR_ANY))
+		sprintf(bufp, "%d", ntohs(a->sin_port));
+	else if(a->sin_port == 0)
+		sprintf(bufp, "%.71s", inet_ntoa(a->sin_addr));
+	else
+		sprintf(bufp, "%.71s:%d",
+			inet_ntoa(a->sin_addr), ntohs(a->sin_port));
+
+	return bufp;
+}
+
+#define bump(str,size,tmp) (tmp = strlen(str), size -= tmp, str += tmp)
+#define pad(str,size) (*(str)++ = ' ', *(str) = 0, (size)++)
+
+void
+logout(int status, loginfo_t *lp)
+{
+	char logbuffer[BUFSIZ];
+	char *bp = logbuffer;
+	size_t room = BUFSIZ, len;
+	time_t t;
+	struct timeval now;
+	struct timezone zone;
+
+	if(logging) {
+	    if(status != S_NORMAL)
+		syslog(LOG_NOTICE, "%.64s: Complete, status=%d.", tag, status);
+	    else
+		syslog(LOG_NOTICE, "%.64s: Complete.", tag);
+	}
+
+	if(!lp) return;
+
+	gettimeofday(&now, &zone);
+
+	t = time(NULL);
+	strftime(bp, room, "[%Y-%m-%d %H:%M:%S] ", localtime(&t));
+	bump(bp,room,len);
+
+	sprintf(bp, "plug[%d] ", getpid());
+	bump(bp,room,len);
+
+	sa2ascii(&lp->listen, bp);
+	bump(bp,room,len);
+	pad(bp,room);
+
+	lp->peer.sin_port = 0; /* Don't care */
+	sa2ascii(&lp->peer, bp);
+	bump(bp,room,len);
+	pad(bp,room);
+
+	sa2ascii(&lp->target, bp);
+	bump(bp,room,len);
+	pad(bp,room);
+
+	sprintf(bp, "%ld %ld ", (long)lp->nread[0], (long)lp->nread[1]);
+	bump(bp,room,len);
+
+	now.tv_sec -= lp->timeval.tv_sec;
+	now.tv_usec -= lp->timeval.tv_usec;
+	if(now.tv_usec < 0) {
+		now.tv_sec--;
+		now.tv_usec += 1000000L;
+	}
+	if(now.tv_sec)
+		sprintf(bp, "%ld%06ld\n",
+			(long)now.tv_sec, (long)now.tv_usec);
+	else
+		sprintf(bp, "%ld\n", (long)now.tv_usec);
+	bump(bp,room,len);
+
+	if(session_file) {
+		int sfd = open(session_file, O_WRONLY|O_CREAT|O_APPEND, 0666);
+		if(sfd>=0) {
+			write(sfd, logbuffer, bp-logbuffer);
+			close(sfd);
+		}
+	} else
+		write(1, logbuffer, bp-logbuffer);
+}
+
+void
+bail_no_val(char *optname)
+{
+	char msgbuf[1024];
+	sprintf(msgbuf, "Missing value for %s", optname);
+	bailout(msgbuf, S_SYNTAX);
 }
 
 void
@@ -237,8 +396,7 @@ bailout(char *message, int status)
 	if(save_errno) {
 		sprintf(p, ": %.64s", strerror(save_errno));
 	} else {
-		sprintf(p, "\nUsage is %.64s %s", prog,
-			"[-V] [-P pidfile] [-klfd[d]...] [-p proxy-addr] [-i srcaddr] [-t seconds] [-a accept_rule]... port destaddr[:destport]...");
+		sprintf(p, "\nUsage: %.64s %s", prog, usage_string);
 	}
 
 	if(!daemonized)
@@ -257,7 +415,8 @@ bailout(char *message, int status)
 void
 parse_args(int ac, char **av)
 {
-	dest_t *new_dest;
+	dest_t *new_dest = NULL, *next_dest = NULL;
+
 	if((prog = strrchr(*av, '/')))
 		prog++;
 	else
@@ -268,40 +427,62 @@ parse_args(int ac, char **av)
 			while(*++*av) switch(**av) {
 			    case 'i':
 				if(!*++*av && !*++av)
-					bailout("no value for -i option", S_SYNTAX);
+					bail_no_val("interface (-i)");
 				sourceaddr = *av;
 				goto nextarg;
 			    case 'p':
 				if(!*++*av && !*++av)
-					bailout("no value for -p option", S_SYNTAX);
+					bail_no_val("proxy address (-p)");
 				proxyaddr = *av;
 				goto nextarg;
 			    case 'P':
 				if(!*++*av && !*++av)
-					bailout("no value for -P option", S_SYNTAX);
+					bail_no_val("PID file (-P)");
 				pidfile = *av;
+				goto nextarg;
+			    case 'h':
+				if(!*++*av && !*++av)
+					bail_no_val("HTTP proxy (-h)");
+				httpsaddr = *av;
 				goto nextarg;
 			    case 't':
 				if(!*++*av && !*++av)
-					bailout("no value for -t option", S_SYNTAX);
+					bail_no_val("timeout (-t)");
 				timeout = atol(*av);
+				goto nextarg;
+			    case 'r':
+				if(!*++*av && !*++av)
+					bail_no_val("retry time (-r)");
+				retrytime = atol(*av);
 				goto nextarg;
 			    case 'a':
 				if(!*++*av && !*++av)
-					bailout("no value for -a option", S_SYNTAX);
+					bail_no_val("access rule (-a)");
 				add_filter_rule(*av);
+				goto nextarg;
+			    case 'S':
+				if(!*++*av && !*++av)
+					bail_no_val("session file (-S)");
+				verbose++;
+				session_file = *av;
 				goto nextarg;
 			    case 'k':
 				keepalive++;
 				continue;
+			    case 'n':
+				background = 0;
+				continue;
 			    case 'l':
-				log++;
+				logging++;
 				continue;
 			    case 'd':
 				debug++;
 				continue;
 			    case 'f':
 				sessionmode++;
+				continue;
+			    case 'o':
+				onlyone++;
 				continue;
 			    case 'V':
 				printf("%s: %s\n", prog, version);
@@ -313,22 +494,31 @@ parse_args(int ac, char **av)
 			if(!sourceport)
 				sourceport = *av;
 			else  {
-				char	*ptr;
-				
-				for (ptr = *av; *ptr != '\0'; ptr++)
+				if(!httpsaddr) {
+				    char *ptr;
+				    for (ptr = *av; *ptr != '\0'; ptr++)
 					if (strchr("0123456789:.", *ptr) == NULL)
-						bailout("proxy host specification not in addr[:port] format", S_SYNTAX);
-				
+					    bailout("target not in addr[:port] format", S_SYNTAX);
+				}
+
 				if(nproxies >= MAX_PROXIES)
-					bailout("too many proxies", S_SYNTAX);
+					bailout("too many targets", S_SYNTAX);
 				new_dest = malloc(sizeof (dest_t));
 				if(!new_dest) {
 					perror("malloc");
-					bailout("Can't allocate dest structure", S_FATAL);
+					bailout("Can't allocate target structure", S_FATAL);
 				}
-				new_dest->next = dest_list;
-				dest_list = new_dest;
-				dest_list->destname = *av;
+
+				new_dest->next = NULL;
+				new_dest->destname = *av;
+
+				if(!dest_list) { /* new list */
+					dest_list = new_dest;
+				} else { /* add to end of list */
+					next_dest->next = new_dest;
+				}
+				next_dest = new_dest;
+
 				nproxies++;
 			}
 		}
@@ -344,11 +534,11 @@ nextarg:	;
 #define NOTIME ((struct timeval *) NULL)
 
 int
-plug(int fd1, int fd2)
+plug(int fd1, int fd2, loginfo_t *lp)
 {
 	struct connx {
 		int fd;			/* socket (bidirectional) */
-		char buf[MAX_MTU];	/* Hold STUFF */
+		char buf[IO_SIZE];	/* Hold STUFF */
 		int len, off;		/* tail, head pointers into buffer */
 		int open;		/* socket still open for reading */
 		int shutdown_wait;	/* other socket closed for reading,
@@ -387,7 +577,7 @@ plug(int fd1, int fd2)
 				if(p_eset) {
 					FD_SET(s[i].fd, p_eset);
 				}
-				if(s[i].len < MAX_MTU) {
+				if(s[i].len < IO_SIZE) {
 					FD_SET(s[i].fd, &rset);
 				}
 				if(s[i].len > s[i].off) {
@@ -404,7 +594,7 @@ plug(int fd1, int fd2)
 				return S_EXCEPT; /* S_NORMAL? */
 			}
 			if(FD_ISSET(s[i].fd, &rset)) {
-				nrd = read(s[i].fd, s[i].buf+s[i].len, MAX_MTU-s[i].len);
+				nrd = read(s[i].fd, s[i].buf+s[i].len, IO_SIZE-s[i].len);
 				if(nrd == -1) { /* Shouldn't happen */
 					nrd = 0; /* fake EOF */
 				}
@@ -417,6 +607,7 @@ plug(int fd1, int fd2)
 					s[i].open = 0;
 				}
 				s[i].len += nrd;
+				if(lp) lp->nread[i] += nrd;
 			}
 			if(FD_ISSET(s[!i].fd, &wset)) {
 				nwr = write(s[!i].fd, s[i].buf+s[i].off, s[i].len-s[i].off);
@@ -438,6 +629,7 @@ plug(int fd1, int fd2)
 						s[!i].shutdown_wait = 0;
 					}
 				}
+				if(lp) lp->nwrite[i] += nwr;
 			}
 		}
 	}
@@ -479,7 +671,7 @@ check_peer(struct in_addr source)
 	for(p = filter_rules; p; p=p->next) {
 		if(debug>2) {
 			fprintf(stderr, "Comparing %08lx&%08lx to %08lx\n",
-				saddr, p->netmask, p->addr);
+				(long)saddr, (long)p->netmask, (long)p->addr);
 		}
 		if( (saddr & p->netmask) == p->addr ) {
 			return 1;
@@ -520,7 +712,7 @@ daemonize(void)
 {
 	int pid;
 
-	if(!debug) {
+	if(background) {
 		if((pid = fork()) == -1)
 			bailout("daemon fork", S_FATAL);
 		if(pid)
@@ -531,7 +723,7 @@ daemonize(void)
 
 	(void)openlog(prog, LOG_PID|LOG_CONS, LOG_DAEMON);
 
-	if(!debug) {
+	if(background) {
 		close(0);
 		close(1);
 		close(2);
@@ -552,23 +744,26 @@ cleanup(int sig)
  * binomes, so the undertaker can deliver them to the Principle Office
  * so their resources can be reused by later children. Doing this
  * keeps them from going viral and crashing the process table, I
- * suspect Megabyte is involved somewhere. [1]
+ * suspect Megabyte is involved somewhere.
  *
  * The undertaker runs at a strategic spot in the main loop where it's
  * most likely that this bit of code will have been recently triggered.
  *
- * There's room for 1023 PIDs, or maybe 1024. Doesn't matter, if it ever
- * gets to the point that anything like that many processes are dying
- * at once this code will already be running into problems due to the
- * undertaker itself getting interrupted. The result of that will be a
- * slow memory leak in plug. I'm not sure of a better way to deal with
- * this. The best solution I have come up with is to have two sets of
- * structures for inform_undertaker to fill, and have the undertaker
- * flip them when it's entered. I'm not sure there isn't a race condition
- * there as well, so input from the bleachers is appreciated.
+ * There's room for GRAVESITES-1 PIDs. If it ever gets to the point that
+ * anything like that many processes are dying at once this code will
+ * already be running into problems due to the undertaker itself getting
+ * interrupted. The result of that will be a slow memory leak in plug.
+ *
+ * There's actually two arrays, and undertaker flips the index when it
+ * starts work so new dead kids get deposited in the other one, this way
+ * the waiter won't end up dropping a body on top of the undertaker.
  */
 void
+#ifdef WAITER_ALTDEF
+waiter(int sig, void * scp)
+#else
 waiter(int sig, SA_HANDLER_ARG2_T code, void * scp)
+#endif
 {
 	int status, pid;
 
@@ -615,19 +810,21 @@ void delete_client (client_t *client, client_t *back_ptr)
 	free(client);
 }
 
-struct dtab *select_target(int clifd)
+struct dtab *select_target(int clifd, loginfo_t *lp)
 {
 	struct sockaddr_in p_addr;
 	int len;
-	struct ctab *client = NULL;
-	struct dtab *target = NULL;
+	client_t *client = 0;
+	dest_t *target = NULL;
+	static dest_t *dest_next = 0;
 	time_t now;
-	int i;
 
-	if(sessionmode || log || filter_rules) {
+	if(lp || sessionmode || logging || filter_rules) {
 		len = sizeof p_addr;
 		if(getpeername( clifd, (struct sockaddr *)&p_addr, &len) == -1)
 			bailout("getpeername", S_FATAL);
+		if(lp)
+			lp->peer = p_addr;
 		if(filter_rules) {
 			if(check_peer(p_addr.sin_addr) == 0) {
 				logclient(p_addr.sin_addr, "Refused.");
@@ -636,33 +833,31 @@ struct dtab *select_target(int clifd)
 		}
 	}
 
-	if(sessionmode) {
-		client_t *client = 0;
-		client_t *back_ptr = 0;
+	now = time((time_t *)0);
 
-		now = time((time_t *)0);
+	if(sessionmode) {
+		client_t *back_ptr = 0;
 
 		/* find a client and get rid of expired ones */
 		client = client_list;
 		while(client != NULL) {
 			/* Clean up expired clients as we go */
 			if(now - client->last_touched > timeout) {
-				delete_client(back_ptr, client);
+				delete_client(client, back_ptr);
 				client = back_ptr;
+				if(!client)
+					break;
 			} else if(client->addr == p_addr.sin_addr.s_addr) {
 				/* check to see if the dest is in failover */
 			 	if(client->dest &&
 				   client->dest->status != S_NORMAL) {
-					delete_client(back_ptr, client);
+					delete_client(client, back_ptr);
 					client = NULL;
 				}
 				break;
 			}
 			back_ptr = client;
-			if (client) 
-				client = client->next;
-			else
-				client = client_list;
+			client = client->next;
 		}
 
 		if(client) { /* Old client, destination good. */
@@ -685,48 +880,70 @@ struct dtab *select_target(int clifd)
 			client->addr = p_addr.sin_addr.s_addr;
 			client->status = 1;
 			client->dest = (struct dtab *)0;
+		} else {
+			logclient(p_addr.sin_addr, "Too many clients.");
 		}
 
 		if(client)
 			client->last_touched = now;
 	}
 
-	/* New client or we're not tracking sessions */
-	if(!sessionmode || !client || !client->dest) {
-		static dest_t *dest_next;
+	/* New client or we're not tracking sessions, find a target */
+	if(!target) {
 		int try;
 		/* select a proxy. Dumb code to cycle them */
+		if (onlyone) /* always start at head of list -- ADB */
+			dest_next = NULL;
 		for(try = 0; try < nproxies; try++) {
+			if(dest_next)
+				dest_next = dest_next->next;
 			if(!dest_next)
 				dest_next = dest_list;
-			if(dest_next->status != S_NORMAL)
-				continue;
-			target = dest_next;
-			dest_next = dest_next->next;
-		}
-		if(try==nproxies) { /* disaster! They're all bad! */
-			/* punt, mark them all good and pick the first.
-			 * This is actually not a bad strategy if the client
-			 * is a web browser, since they'll just get soft
-			 * failures until one comes up.
-			 */
-			for(dest_next = dest_list; dest_next; dest_next = dest_next->next) {
-				dest_next->status = S_NORMAL;
+			if(dest_next->status == S_NORMAL) {
+				target = dest_next;
+				break;
 			}
-			target = dest_next = dest_list;
-			dest_next = dest_next->next;
-		}
-		if(sessionmode && client) {
-			client->dest = target;
-			target->nclients++;
+			/* retry destinations periodically -- ADB */
+			if(retrytime &&
+			   now > dest_next->went_bad + retrytime) {
+				if(debug>1) {
+					fprintf(stderr,
+					    "retrying destination %s.\n",
+					    sa2ascii(&dest_next->addr, NULL));
+				}
+				target = dest_next;
+				dest_next->status = S_NORMAL;
+				break;
+			}
 		}
 	}
 
-	if(log) {
-		char tmp[64]; /* big enough for IPv6, in ":" fmt */
+	if(!target) { /* disaster! They're all bad! */
+		struct dtab *dp;
+		/* punt, mark them all good and pick the first.
+		 * This is actually not a bad strategy if the client
+		 * is a web browser, since they'll just get soft
+		 * failures until one comes up.
+		 */
+		for(dp = dest_list; dp; dp = dp->next) {
+			dp->status = S_NORMAL;
+		}
+		target = dest_next = dest_list;
+		dest_next = dest_next->next;
+	}
+
+	if(client && !client->dest) {
+		client->dest = target;
+		target->nclients++;
+	}
+
+	if(logging) {
+		char tmp[128]; /* big enough for IPv6, in ":" fmt */
 		sprintf(tmp, "to %s", inet_ntoa(target->addr.sin_addr));
 		logclient(p_addr.sin_addr, tmp);
 	}
+
+	if(lp) lp->target = target->addr;
 
 	return target;
 }
@@ -735,7 +952,7 @@ struct ptab *lookup_pid(int pid)
 {
 	proc_t *p;
 
-	for(p = proc_list; p; p=p->next)
+	for(p = proc_list[hash(pid)]; p; p=p->next)
 		if(p->pid == pid)
 			break;
 
@@ -748,12 +965,16 @@ remember_pid(int pid, struct dtab * target)
 	proc_t *p = lookup_pid(pid);
 
 	if(!p) {
-		if(nprocs>=MAX_CLIENTS*USAGE_FACTOR)
+		int bucket = hash(pid);
+		if(nprocs>=MAX_CLIENTS*USAGE_FACTOR) {
+			syslog(LOG_ERR,
+				"%s: Client table full, pid %d", tag, pid);
 			return;
+		}
 		if(!(p = malloc(sizeof (proc_t))))
 			return;
-		p->next = proc_list;
-		proc_list = p;
+		p->next = proc_list[bucket];
+		proc_list[bucket] = p;
 		nprocs++;
 	}
 
@@ -761,30 +982,45 @@ remember_pid(int pid, struct dtab * target)
 	p->dest = target;
 }
 
-struct { int pid, status; } dead_children[1024];
-int next_dead_child = 0;
+int graveyard = 0;
+struct { int pid, status; } dead_children[2][GRAVESITES];
+int next_dead_child[2] = { 0, 0 };
 
 void inform_undertaker(int pid, int status) {
 	int child;
 
-	if(next_dead_child > 1023) {
+	if(next_dead_child[graveyard] >= GRAVESITES) {
 		bailout("Too many dead_children in inform_undertaker", S_FATAL);
 	}
-	child = next_dead_child++;
+	child = next_dead_child[graveyard]++;
 
-	dead_children[child].pid = pid;
-	dead_children[child].status = status;
+	dead_children[graveyard][child].pid = pid;
+	dead_children[graveyard][child].status = status;
 }
 
 void undertaker(void)
 {
+	int funeral;
+
+	for(funeral = 0; funeral < 2; funeral++) {
+		graveyard = !graveyard;
+		burials(!graveyard);
+	}
+}
+
+void burials(where)
+{
 	int pid, status, child;
 
-	if(next_dead_child > 0) {
-		while(next_dead_child > 0) {
-			child = --next_dead_child;
-			pid = dead_children[child].pid;
-			status = dead_children[child].status;
+	if(next_dead_child[where] > 0) {
+		while(next_dead_child[where] > 0) {
+			child = --next_dead_child[where];
+			pid = dead_children[where][child].pid;
+
+			status = dead_children[where][child].status;
+			status = WIFEXITED(status)
+					? WEXITSTATUS(status)
+					: S_FATAL;
 
 			switch(status) {
 				case S_CONNECT:
@@ -805,7 +1041,7 @@ void
 forget_pid(int pid)
 {
 	proc_t *back_ptr = NULL;
-	proc_t *p = proc_list;
+	proc_t *p = proc_list[hash(pid)];
 
 	while(p) {
 		if(p->pid == pid)
@@ -820,7 +1056,7 @@ forget_pid(int pid)
 	if(back_ptr)
 		back_ptr->next = p->next;
 	else
-		proc_list=p->next;
+		proc_list[hash(pid)]=p->next;
 	free(p);
 }
 
@@ -834,24 +1070,24 @@ tag_dest_bad(int pid, int status)
 
 	/* OK, we know this destination has failed. Change its status */
 	p->dest->status = status;
+	p->dest->went_bad = time((time_t *)0);
+
+	if(debug>1)
+		fprintf(stderr, "destination %s bad status %d.\n",
+			sa2ascii(&p->dest->addr, NULL), status);
 }
 
-write_pidfile()
+void write_pidfile(void)
 {
 	FILE *fp;
-	char *msg;
 
 	if(!pidfile) return;
 
-	msg = malloc(strlen(pidfile)+strlen("Can't open PID file %s."));
-	if(!msg)
-		bailout("Can't malloc", S_FATAL);
-
-	sprintf(msg, "Can't open PID file %s.", pidfile);
 	if (!(fp = fopen(pidfile, "w"))) {
-		bailout(msg, S_FATAL);
+		static char msgbuf[256]; /* text + 2 #s */
+		sprintf(msgbuf, "PID file %.128s: Error %d", pidfile, errno);
+		bailout(msgbuf, S_FATAL);
 	}
-	free(msg);
 
 	fprintf(fp, "%d\n", getpid());
 
@@ -860,10 +1096,11 @@ write_pidfile()
 	delete_pidfile = pidfile;
 }
 
-update_pidfile()
+void update_pidfile(void)
 {
 	FILE *fp;
 	proc_t *p;
+	int hindex;
 
 	if(!pidfile) return;
 	if(!delete_pidfile) return;
@@ -873,16 +1110,104 @@ update_pidfile()
 
 	fprintf(fp, "%d\n", getpid());
 
-	for(p = proc_list; p; p=p->next)
-		fprintf(fp, "%d\n", p->pid);
+	for(hindex = 0; hindex < HASH_SIZE; hindex++) {
+		for(p = proc_list[hindex]; p; p=p->next)
+			fprintf(fp, "%d\n", p->pid);
+	}
 
 	fclose(fp);
 
 	delete_pidfile = pidfile;
 }
 
-/* [1] No, I do really know why the corruption occurred. I don't really
- * believe there are little animated 1s and 0s in computers, let alone
- * blue viruses with metal teeth. That's a nice white coat but I don't
- * think I need it.
- */
+char *https_chat(int fd, char *name)
+{
+	static char chatbuf[IO_SIZE];
+	char *errmsg;
+	char *s;
+	int result;
+
+	if(debug>1)
+		fprintf(stderr, "https_chat(%d, '%s');\n", fd, name);
+
+	sprintf(chatbuf, "CONNECT %s HTTP/1.1\r\n\r\n", name);
+	if(debug>1)
+		fprintf(stderr, "%s\n", chatbuf);
+
+	write(fd, chatbuf, strlen(chatbuf));
+
+	if((errmsg = raw_readline(fd, chatbuf, IO_SIZE)))
+		return errmsg;
+	s = strchr(chatbuf, ' ');
+	if(!s)
+		goto synerr;
+	if(!*++s)
+		goto synerr;
+
+	result = 0;
+	while(isdigit(*s)) {
+		result = result * 10 + *s - '0';
+		s++;
+	}
+	if(result == 200) {
+		while(1) {
+			if((errmsg = raw_readline(fd, chatbuf, IO_SIZE)))
+				return errmsg;
+			for(s = chatbuf; isspace(*s); s++)
+				continue;
+			if(!*s)
+				return NULL;
+		}
+	}
+	while(isspace(*s))
+		s++;
+	if(*s)
+		return s;
+synerr:
+	return "Malformed response from HTTPS proxy";
+}
+
+char *raw_readline(int fd, char *buffer, int maxlen)
+{
+	int n = 0;
+	char *errmsg = NULL;
+	char *s;
+	char lastc = 0;
+
+	if(debug > 1)
+		fprintf(stderr, "raw_readline(%d, buffer, %d);\n", fd, maxlen);
+
+	s = buffer;
+
+	while(s - buffer < maxlen) {
+		n = read(fd, s, 1);
+		if(n<=0) {
+			errmsg = n ? "Error on socket" : "Connection closed";
+			break;
+		}
+		if(lastc == '\r') {
+			if(*s == '\n') {
+				*s = 0;
+				if(debug > 1 && *buffer)
+					fprintf(stderr, "%s\n", buffer);
+				return 0;
+			}
+			/* slide a CR in under whatever the character is */
+			*(s+1) = *s;
+			*s = '\r';
+			s++;
+		}
+		lastc = *s;
+		if(*s != '\r')
+			s++;
+	}
+	if(debug) {
+		if(n) perror("read");
+		*s = 0;
+		if(*buffer)
+			fprintf(stderr, "%s\n", buffer);
+		if(!n)
+			fprintf(stderr, "<EOF>\n");
+	}
+	return errmsg;
+}

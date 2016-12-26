@@ -1,4 +1,4 @@
-Plugdaemon 2.3.1
+Plugdaemon 2.5
 
 Plugdaemon is a tool that is inspired by, but not based on, the plug-gw from
 Trusted Information Systems. It was originally a simpler wannabe, but the
@@ -55,4 +55,34 @@ Changes:
 
 	2.3.1		Added ability to restrict connections by source
 			address.
+
+	2.4		Big code cleanup, integrated many improvements
+			from Anthony de Boer <adb@leftmind.net>
+				-o, -r options.
+				Improved undertaker code.
+				Fixed "orphan zombie" children.
+				Patches for Linux.
+
+	2.4.1		Mac OS X 10.1.5
+
+	2.5		Mac OS X 10.2 / 10.3
+			Log connection completion on (-l).
+			Added "no daemon" option (-n).
+			Added session logging suggested by Alexander Lazic.
+				-s, -S session_file options.
+			Added HTTPS proxy support (-h).
+
+	2.4.2		Fixed bug in retry (-r) option.
+
+	2.5.1		Fixed bug in retry (-r) option.
+
+	2.5.2		Fixed stupid initialization bug, various Linux
+				fixes by Alexander Lazic.
+			No longer a sinner: tarball now created from proper
+				directory tree.
+
+	2.5.3		Code cleanup, hash connection structures.
+			Dietlibc support by Alexander Lazic
+				(see Makefile)
+			Fix load-balancing (Ben Low).
 

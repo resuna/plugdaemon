@@ -9,12 +9,17 @@ plug -- Plug proxy daemon.
 .I [-f]
 .I [-l]
 .I [-P pidfile]
+.I [-S sessionfile]
 .I [-k]
 .I [-d[d]]
+.I [-n]
 .I [-i sourceaddr]
 .I [-p proxyaddr]
+.I [-h https-proxy[:port]]
 .I [-t timeout]
 .I [-a accept_rule]
+.I [-o]
+.I [-r retry]
 .I [-V]
 .B sourceport
 .BI destaddr [:destport]
@@ -43,17 +48,33 @@ that may go a long time without transferring data.
 turns on connection logging.
 .TP
 -P pidfile
-maintains a file that contains the process ID of the master plug daemon,
+Maintains a file that contains the process ID of the master plug daemon,
 followed by the process IDs of all the active children. This can be used
 for cleanup or monitoring. The file is deleted when the parent process
 exits.
 .TP
+-S sessionfile
+Write session info to this file at the end of each connection:
+.IP
+[yyyy-mm-dd HH:MM:SS] plug[PID] FROM PEER TO IN OUT DURATION
+.IP
+Where "yyyy-mm-dd HH:MM:SS" is the time the connection closed, PID
+is the process-id of the connection, PEER is the address of the client
+that connected, FROM and TO are the listener port (and address, if
+specified) and target address and port, IN and OUT are the bytes read
+and written, and DURATION is the connection duration in microseconds.
+.P
+If the session file is "-", it writes the session to standard output
+(implies -n).
+.TP
 -d
-turns on debugging output and stops
+turns on debugging output (implies -n).
+Additional -d options add more output.
+.TP
+-n Stops
 .B plug
 from running as a daemon or logging errors to syslog. Errors in this mode
 are displayed on standard error.
-Additional -d options add more output.
 .TP
 -i interface
 Bind the plug to the named interface, for use on multi-homed hosts.
@@ -61,6 +82,13 @@ Bind the plug to the named interface, for use on multi-homed hosts.
 -p interface
 Bind the source port of the proxied connection to the named interface,
 for use on multi-homed hosts.
+.TP
+-h host:port
+Connect via an HTTPS proxy on host:port. Note that when using -h
+.I and
+-p, the -p option specifies the interface to bind to for the connection
+to the HTTPS proxy, since there is no way to control what the HTTPS proxy
+might do.
 .TP
 -a accept_rule
 Accept connections that match the rule. Currently, the rule is an ip
@@ -75,18 +103,56 @@ Timeout for forced connections, after no attempts in this period
 it will connect to a new (pseudo-)randomly selected server. The
 default is 1 hour.
 .TP
+-o
+Direct all connections to the first valid server instead of load-balancing.
+.TP
+-r retry
+Timeout for downed servers; if specified, then a dead server is retried
+after this many seconds.
+If not specified, then a dead server stays out of the pool until all have
+failed or plugdaemon is restarted, then all are retried again.
+.TP
 -V
 Prints version and exits.
 .SH EXAMPLES
-To proxy an NNTP connection through a firewall to a host at 10.0.3.15:
+On a firewall at 192.168.0.14, to proxy an NNTP connection through to a
+host at 10.0.3.15:
 .P
 plug -i 192.168.0.14 119 10.0.3.15
+.P
+On an client, to forward an SSH connection through an HTTP proxy at
+192.168.0.101 port 8008
+.P
+plug -i 127.0.0.1 2022 -h 192.168.0.101:8008 customer.example.com:22
+.P
+To forward an AIM connection through the same proxy:
+.P
+plug -h 192.168.0.101:8008 9898 toc.oscar.aol.com:9898
+.P
+(then tell your AIM client to connect to localhost port 9898)
 .SH BUGS
 .B Plugdaemon
 only accepts numeric IP addresses and services.
+.P
+The syntax is rather clumsy, but I'm deferring cleanup until version 3.0. The
+main thing I'd like to do is get rid of the -i option and allow any of the
+following forms for the source:
+.IR port ,
+.IR :port ,
+.IR *:port ,
+.IR address:port ,
+or
+.I source/interface
+(to specify the outgoing interface).
+As well as regularise the various flags other people have added that I've
+kept to keep from breaking their scripts.
 .SH "SECURITY FEATURES"
 .B Plugdaemon
 only accepts numeric IP addresses and services.
+.P
+I don't call gethostbyname anywhere to keep someone from managing to fake it
+out by spoofing the firewall, but I think that there's places this would be
+a minor risk, so 3.0 will probably add that as a compile-time option.
 .SH LICENSE
 .B Plugdaemon
 is released under a "Berkeley" style license. See the file LICENSE for details.

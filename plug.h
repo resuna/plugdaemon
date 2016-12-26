@@ -1,5 +1,5 @@
 /*
- * PLUGDAEMON. Copyright (c) 1997 Peter da Silva. All rights reserved.
+ * PLUGDAEMON. Copyright (c) 2004 Peter da Silva. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,13 +33,21 @@
 #define S_FATAL 4
 #define S_SYNTAX 5
 
+typedef struct {
+	struct timeval timeval;
+	struct timezone timezone;
+	struct sockaddr_in peer, listen, client, proxy, target;
+	off_t nread[2], nwrite[2];
+} loginfo_t;
+
 typedef struct dtab {
 	struct dtab *next;
 	char *destname;
+	char *connect;
 	struct sockaddr_in addr;
 	int nclients;
 	int status;
-	time_t last_touched;
+	time_t went_bad;
 } dest_t;
 
 typedef struct ptab {
@@ -53,6 +61,7 @@ typedef struct ctab {
 	unsigned long addr;
 	struct dtab *dest;
 	int status;
+	int bucket;
 	time_t last_touched;
 } client_t;
 
@@ -62,20 +71,32 @@ typedef struct rtab {
 	u_long netmask;
 } rule_t;
 
+void bail_no_val(char *);
 void bailout (char *message, int status);
 void daemonize (void);
 void delete_client (client_t *client, client_t *back_ptr);
 void fill_sockaddr_in (struct sockaddr_in *buffer, u_long addr, u_short port);
+char *sa2ascii(struct sockaddr_in *, char *);
 void forget_pid (int pid);
 void init_signals (void);
 void logclient (struct in_addr peer, char* status);
 struct ptab *lookup_pid (int pid);
 void parse_args (int ac, char **av);
-int plug (int fd1, int fd2);
+int plug (int fd1, int fd2, loginfo_t *lp);
 void remember_pid (int pid, struct dtab *target);
-struct dtab *select_target (int clifd);
+struct dtab *select_target (int clifd, loginfo_t *lp);
 void tag_dest_bad (int pid, int status);
+#ifdef WAITER_ALTDEF
+void waiter (int sig, void *scp);
+#else
 void waiter (int sig, SA_HANDLER_ARG2_T code, void *scp);
+#endif
 void inform_undertaker(int pid, int status);
 void undertaker(void);
+void burials(int);
 void add_filter_rule(char *);
+void logout(int, loginfo_t *);
+char *https_chat(int, char *);
+char *raw_readline(int, char *, int);
+void write_pidfile(void);
+void update_pidfile(void);
