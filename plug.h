@@ -25,21 +25,57 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define MAX_PROXIES 32
-#define MAX_CLIENTS 16384 /* These are held for a whole timeout period */
-#define MAX_MTU 2048	/* not strictly MTU, but size of reads and writes */
+/* Exit statuses */
+#define S_NORMAL 0
+#define S_UNKNOWN 1
+#define S_CONNECT 2
+#define S_EXCEPT 3
+#define S_FATAL 4
+#define S_SYNTAX 5
 
-/* OS-specific variations in sigaction arguments */
+typedef struct dtab {
+	struct dtab *next;
+	char *destname;
+	struct sockaddr_in addr;
+	int nclients;
+	int status;
+	time_t last_touched;
+} dest_t;
 
-#ifdef sa_sigaction
-#define SA_HANDLER sa_sigaction
-#else
-#define SA_HANDLER sa_handler
-#endif
+typedef struct ptab {
+	struct ptab *next;
+	int pid;
+	struct dtab *dest;
+} proc_t;
 
-#ifdef __OpenBSD__
-#define SA_HANDLER_ARG2_T siginfo_t *
-#else
-#define SA_HANDLER_ARG2_T int
-#endif
+typedef struct ctab {
+	struct ctab *next;
+	unsigned long addr;
+	struct dtab *dest;
+	int status;
+	time_t last_touched;
+} client_t;
 
+typedef struct rtab {
+	struct rtab *next;
+	u_long addr;
+	u_long netmask;
+} rule_t;
+
+void bailout (char *message, int status);
+void daemonize (void);
+void delete_client (client_t *client, client_t *back_ptr);
+void fill_sockaddr_in (struct sockaddr_in *buffer, u_long addr, u_short port);
+void forget_pid (int pid);
+void init_signals (void);
+void logclient (struct in_addr peer, char* status);
+struct ptab *lookup_pid (int pid);
+void parse_args (int ac, char **av);
+int plug (int fd1, int fd2);
+void remember_pid (int pid, struct dtab *target);
+struct dtab *select_target (int clifd);
+void tag_dest_bad (int pid, int status);
+void waiter (int sig, SA_HANDLER_ARG2_T code, void *scp);
+void inform_undertaker(int pid, int status);
+void undertaker(void);
+void add_filter_rule(char *);
