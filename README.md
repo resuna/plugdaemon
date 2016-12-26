@@ -1,14 +1,14 @@
-![Plugademon Logo](https://raw.githubusercontent.com/resuna/plugdaemon/master/plugdaemon2.gif)
+![Plugademon Logo](https://github.com/resuna/plugdaemon/raw/master/plugdaemon2.gif)
 
 # Plugdaemon
 
-Plugdaemon is a tool that is inspired by, but not based on, the plug-gw from Trusted Information Systems. It was originally a simpler wannabe, but the connection balancing code and other features makes it a lot more useful (as of 2.3.1 it's also a feature-complete replacement for plug-gw).
+Plugdaemon [2] is a tool that is inspired by, but not based on, the plug-gw from Trusted Information Systems. It was originally a simpler wannabe, but the connection balancing code and other features makes it a lot more useful (as of 2.3.1 it's also a feature-complete replacement for plug-gw).
 
 Not all the planned features are implemented in 2.x. Eventually plugdaemon will provide a complete load balancing and monitoring package for servers.
 
 Plugdaemon is released for any use, commercial or otherwise, so long as attribution is retained. If you do anything interesting with it, let me know. If you feel generous, tip me.
 
-The 1.2 code is missing some functionality, but is simpler code and will compile on K&R compilers for SunOS 4 and Xenix fans. Check out the 1.2.2 branch.
+The 1.2 code is missing some functionality, but is simpler code and will compile on K&R compilers for SunOS 4 and Xenix fans. Check out the 1.2.2 branch. See note [1]
 
 ### Recent changes:
 
@@ -112,3 +112,4 @@ I'm going to completely redo the command line syntax in 3.0, because it's gotten
 
 [1] There is a bug in 2.2 and earlier versions that can lead to a corrupted internal process table under extremely high load conditions, and a plug "hanging" as it follows a wild rabbit down the rabbit hole forever (I can guarantee that an Alphaserver ES40 opening and closing connections as fast as it can will trigger it, and I'm glad it happened though I *was* rather cross at the time). This is a process leak, caused by multiple signal handlers writing process IDs in the same locations in a table. Security issue: denial of service.
 
+[2] By the way, that's not Invisible Chuck. The invisible daemon is something I started doodling back in the mid '70s when I was in high school, before I'd ever heard of UNIX.
