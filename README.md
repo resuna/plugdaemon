@@ -8,7 +8,7 @@ Plugdaemon is released for any use, commercial or otherwise, so long as attribut
 
 The 1.2 code is missing some functionality, but is simpler code and will compile on K&R compilers for SunOS 4 and Xenix fans. Check out the 1.2.2 branch.
 
-Recent changes:
+### Recent changes:
 
 2.5.5 has some cleanup for warnings in more recent versions of gcc. This includes a possible format injection in syslog detected by -Wformat-security.
 
@@ -16,29 +16,29 @@ Recent changes:
 
 2.5.3 is stable and has fixes for several bugs missed when I integrated various patches, thanks to Alexander Lazic and Ben Low, as well as an improved table lookup that should prevent a process runaway under load.
 
-Ironic statement from ten years ago about future plans:
+### Ironic statement from ten years ago about future plans:
 
 I'm going to completely redo the command line syntax in 3.0, because it's gotten rather cruddy. Suggestions will be appreciated... also ideas for new features would be timely.
 
 Documentation: (the version an option was added is in italic in parentheses)
 
-PLUG(1)                                                               PLUG(1)
+## PLUG(1)                                                               PLUG(1)
 
-NAME
+### NAME
   plug -- Plug proxy daemon.
 
-SYNOPSIS
+### SYNOPSIS
   plug -V
   plug [-nflkd...] [-i addr] [-p addr] [-t seconds] [-r seconds] [-a net[/bits]]... [-h addr:port]
      port addr[:port] [addr[:port]]...
 
-DESCRIPTION
+### DESCRIPTION
   Plugdaemon acts as a "dumb proxy", forwarding a TCP/IP stream from a port
   on one host to a possibly different port on a separate host. It runs as a
   daemon to reduce latency in setting up a connection, and optionally logs
   every connection via syslog.
 
-OPTIONS
+### OPTIONS
 
   -f   Forces a given client address to continue to connect to the same host
        on subsequent attempts, for proxying HTTP connections so that subse-
@@ -51,7 +51,7 @@ OPTIONS
 
   -l   turns on connection logging. _(2.5)_
 
-  -P pidfile (2.2)
+  -P pidfile _(2.2)_
        maintains a file that contains the process ID of the master plug dae-
        mon, followed by the process IDs of all the active children. This can
        be used for cleanup or monitoring. The file is deleted when the parent
@@ -105,12 +105,14 @@ OPTIONS
        connecting directly.
 
 
-EXAMPLES
+### EXAMPLES
+
   To proxy an NNTP connection through a firewall to a host at 10.0.3.15:
 
   plug -i 192.168.0.14 119 10.0.3.15
 
-BUGS
+### BUGS
+
   Plugdaemon only accepts numeric IP addresses and services.
 
   The syntax is rather clumsy, but I'm deferring cleanup until version
@@ -122,7 +124,8 @@ BUGS
    As well as regularise the various flags other people have added that
    I've kept to keep from breaking their scripts.
 
-SECURITY FEATURES
+### SECURITY FEATURES
+
   Plugdaemon only accepts numeric IP addresses and services.
 
   I don't call gethostbyname anywhere to keep someone from managing
@@ -130,12 +133,16 @@ SECURITY FEATURES
   that should be an option so 3.0 will probably disable it unless
   selected at compile time.
 
-LICENSE
+### LICENSE
+
   Plugdaemon is released under a "Berkeley" style license. See the file
   LICENSE for details.
 
-AUTHOR
+### AUTHOR
+
   Peter da Silva <resuna at gmail.com>
+
+----------
 
 [1] There is a bug in 2.2 and earlier versions that can lead to a corrupted internal process table under extremely high load conditions, and a plug "hanging" as it follows a wild rabbit down the rabbit hole forever (I can guarantee that an Alphaserver ES40 opening and closing connections as fast as it can will trigger it, and I'm glad it happened though I *was* rather cross at the time). This is a process leak, caused by multiple signal handlers writing process IDs in the same locations in a table. Security issue: denial of service.
 
