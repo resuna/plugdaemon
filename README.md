@@ -1,3 +1,5 @@
+![Plugademon Logo](https://raw.githubusercontent.com/resuna/plugdaemon/master/plugdaemon2.gif)
+
 # Plugdaemon
 
 Plugdaemon is a tool that is inspired by, but not based on, the plug-gw from Trusted Information Systems. It was originally a simpler wannabe, but the connection balancing code and other features makes it a lot more useful (as of 2.3.1 it's also a feature-complete replacement for plug-gw).
