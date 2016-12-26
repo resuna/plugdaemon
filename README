@@ -1,0 +1,27 @@
+Plugdaemon 1.2.2
+
+Plugdaemon is a tool that is inspired by, but not based on, the plug-gw from
+Trusted Information Systems. It was originally a simpler wannabe, but the
+connection balancing code makes up for it.
+
+Not all the planned features are implemented in 1.2. Eventually plugdaemon
+will provide a complete load balancing and monitoring package for servers.
+
+Plugdaemon is released for any use, commercial or otherwise, so long as
+attribution is retained.
+
+If you do anything interesting with it, let me know.
+
+				-- Peter da Silva <peter@taronga.com>
+
+Changes:
+
+	1.1.1		Bug fix for lost data on slow readers.
+	1.1.2		Added prototypes, minor cleanup.
+	1.1.3		Added "-V" version option, more cleanup,
+				moved OS-specific ifdefs out of plug.c.
+	1.2 (fork)	Keepalive option.
+	1.2.1		Integrated OpenBSD specific code in 1.2 with
+				cleaned up 1.1 code.
+	1.2.2		Fixed read error bug.
+
