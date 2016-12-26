@@ -86,3 +86,9 @@ Changes:
 				(see Makefile)
 			Fix load-balancing (Ben Low).
 
+	2.5.4		Fixes a problem where a remote host closed a
+			connection too quickly, and getpeername failed.
+
+	2.5.5		Clean up to eliminate compile warnings, possible format
+			injection.
+

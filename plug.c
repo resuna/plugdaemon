@@ -1,5 +1,5 @@
 /*
- * PLUGDAEMON. Copyright (c) 2004 Peter da Silva. All rights reserved.
+ * PLUGDAEMON. Copyright (c) 2012 Peter da Silva. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -58,7 +58,7 @@ int nproxies = 0;
 int nclients = 0;
 int nprocs = 0;
 
-char *version = "plugdaemon V2.5.3 Copyright (c) 2004 Peter da Silva";
+char *version = "plugdaemon V2.5.5 Copyright (c) 2012 Peter da Silva";
 
 char *usage_string = "[-V] [-P pidfile] [-S sessionfile] [-snklfod[d]...]\n"
 		     "\t[-p proxy-addr] [-i srcaddr] [-a accept_rule]...\n"
@@ -194,7 +194,8 @@ main(int ac, char **av)
 	if(debug>2) fprintf(stderr, "start main loop\n");
 	/* wait for connections and service them */
 	while(1) {
-		int clifd, prxfd, cli_len, status;
+		int clifd, prxfd, status;
+		socklen_t cli_len;
 		struct sockaddr_in cli_sockaddr;
 
 		if(debug>1)
@@ -402,7 +403,7 @@ bailout(char *message, int status)
 	if(!daemonized)
 		fprintf(stderr, "%s\n", msgbuf);
 	else {
-		syslog(LOG_ERR, msgbuf);
+		syslog(LOG_ERR, "%s", msgbuf);
 		closelog();
 	}
 
@@ -824,7 +825,7 @@ void delete_client (client_t *client, client_t *back_ptr)
 struct dtab *select_target(int clifd, loginfo_t *lp)
 {
 	struct sockaddr_in p_addr;
-	int len;
+	socklen_t len;
 	client_t *client = 0;
 	dest_t *target = NULL;
 	static dest_t *dest_next = 0;

@@ -2,7 +2,7 @@
 #
 
 SOURCES= README Makefile LICENSE plug.1 plug.c plug.h config.h includes.h
-VER=2.5.4
+VER=2.5.5
 T=plugdaemon-$(VER)
 
 # dietlibc with al
