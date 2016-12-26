@@ -40,71 +40,34 @@ I'm going to completely redo the command line syntax in 3.0, because it's gotten
 
 ### OPTIONS
 
-```
--f   Forces a given client address to continue to connect to the same host
-     on subsequent attempts, for proxying HTTP connections so that subse-
-     quent hits will be on the same mirror.
-
--k   Turns on SO_KEEPALIVE on the plug. You want to use this on frequent
-     short term connections like HTTP requests where response time is more
-     important than reliability on flakey links, and leave it off on long-
-     term connections that may go a long time without transferring data.
-
--l   turns on connection logging. _(2.5)_
-
--P pidfile _(2.2)_
-     maintains a file that contains the process ID of the master plug dae-
-     mon, followed by the process IDs of all the active children. This can
-     be used for cleanup or monitoring. The file is deleted when the parent
-     process exits.
-
--d   turns on debugging output and stops plug from logging errors
-     to syslog. Errors in this mode are displayed on standard error.
-     Additional -d options add more output. (implies -n)
-
--i interface
-     Bind the plug to the named interface, for use on dual-homed hosts.
-
--p interface _(2.0.2)_
-     Bind the source port of the proxied connection to the named interface,
-     likewise.
-
--a accept_rule _(2.3)_
-     Accept connections that match the rule.  Currently, the  rule
-     is an ip address and an optional subnet, e.g. -a 192.168.2.0/24
-     to accept connections  from the  Class-C  subnet 192.168.2. All
-     4 octets of the address must be provided. If no rules are specified
-     connections are allowed from any address.
-
--t timeout _(2.4)_
-     Timeout for forced connections, after no attempts in this period it
-     will connect to a new (pseudo-)randomly selected server. The default
-     is 1 hour.
-
--o _(2.4)_
-     Direct all connections to the first valid server instead of load-
-     balancing.
-
--r retry _(2.4)_
-     Timeout for downed servers; if specified, then a dead server is
-     retried after this many seconds.  If not specified, then a dead server
-     stays out of the pool until all have failed or plugdaemon is res-
-     tarted, then all are retried again.
-
--V _(1.1.3)_
-     Display version and exit.
-
--n _(2.5)_
-    Don't detach, run in the foreground.
-
--S filename _(2.5)_
-     log sessions to the named file. If the file is "-", log to standard
-     output (which implies -n).
-
--h address:port _(2.5)_
-     Use HTTPS proxy at address:port to make connections, rather than
-     connecting directly.
-```
+<dl compact>
+<dt>-f<dd>  Forces a given client address to continue to connect to the same host on subsequent attempts, for proxying HTTP connections so that subsequent hits will be on the same mirror.  
+<dt>-k<dd>  Turns on SO_KEEPALIVE on the plug. You want to use this on frequent short term connections like HTTP requests where response time is more important than reliability on flakey links, and leave it off on long- term connections that may go a long time without transferring data.  
+<dt>-l _(2.5)_
+<dd>  turns on connection logging.
+<dt>-P pidfile _(2.2)_ <dd>    maintains a file that contains the process ID of the master plug dae- mon, followed by the process IDs of all the active children. This can be used for cleanup or monitoring. The file is deleted when the parent process exits.  
+<dt>-d<dd>  turns on debugging output and stops plug from logging errors to syslog. Errors in this mode are displayed on standard error.  Additional -d options add more output. (implies -n) 
+<dt>-i interface
+<dd>    Bind the plug to the named interface, for use on dual-homed hosts.  
+<dt>-p interface _(2.0.2)_
+<dd>    Bind the source port of the proxied connection to the named interface, likewise.  
+<dt>-a accept_rule _(2.3)_
+<dd>    Accept connections that match the rule.  Currently, the  rule is an ip address and an optional subnet, e.g. -a 192.168.2.0/24 to accept connections  from the  Class-C  subnet 192.168.2. All 4 octets of the address must be provided. If no rules are specified connections are allowed from any address.  
+<dt>-t timeout _(2.4)_
+<dd>    Timeout for forced connections, after no attempts in this period it will connect to a new (pseudo-)randomly selected server. The default is 1 hour.  
+<dt>-o _(2.4)_
+<dd>    Direct all connections to the first valid server instead of load- balancing.  
+<dt>-r retry _(2.4)_
+<dd>    Timeout for downed servers; if specified, then a dead server is retried after this many seconds.  If not specified, then a dead server stays out of the pool until all have failed or plugdaemon is res- tarted, then all are retried again.  
+<dt>-V _(1.1.3)_
+<dd>    Display version and exit.  
+<dt>-n _(2.5)_
+<dd>   Don't detach, run in the foreground.  
+<dt>-S filename _(2.5)_
+<dd>    log sessions to the named file. If the file is "-", log to standard output (which implies -n).  
+<dt>-h address:port _(2.5)_
+<dd>    Use HTTPS proxy at address:port to make connections, rather than connecting directly.
+</dl>
 
 ### EXAMPLES
 
